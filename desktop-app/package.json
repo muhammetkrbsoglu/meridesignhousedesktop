@@ -1,0 +1,143 @@
+{
+  "name": "meridesignhouse-desktop",
+  "version": "1.0.0",
+  "description": "Meri Design House Desktop Application - Stock and Order Management System",
+  "private": true,
+  "main": "dist/main/index.js",
+  "author": "Meri Design House",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run build:renderer\" \"ts-node src/main/dev.ts\"",
+    "build": "npm run build:renderer && npm run bundle:renderer && npm run copy-preload",
+    "start": "electron src/main/build.js",
+    "build:prod": "npm run build:renderer && npm run bundle:renderer",
+    "build:renderer": "tsc && npm run prepare:dist && npm run copy-html && npm run build-css",
+    "prepare:dist": "node -e \"require('fs').mkdirSync('dist/renderer',{recursive:true})\"",
+    "bundle:renderer": "esbuild dist/src/renderer/main.js --bundle --format=esm --outfile=dist/renderer/bundle.js",
+    "build-css": "node build-css.js",
+    "copy-html": "copy src\\renderer\\index.html dist\\renderer\\index.html",
+    "copy-preload": "copy src\\main\\preload.cjs dist\\main\\preload.cjs",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest --watch",
+    "test:unit": "vitest run --reporter=verbose",
+    "test:e2e": "playwright test",
+    "test:perf": "npm run test:run -- --reporter=json > test-results.json && node scripts/analyze-performance.js",
+    "deploy": "node scripts/deploy.js",
+    "deploy:staging": "node scripts/deploy.js staging",
+    "deploy:production": "node scripts/deploy.js production",
+    "security:audit": "npm audit",
+    "security:test": "node scripts/security-test.js",
+    "performance:test": "node scripts/performance-test.js",
+    "migrate:excel": "node scripts/excel-migration-old.js",
+    "migrate:sqlite": "node scripts/sqlite-migration.js --run",
+    "migrate:sqlite:test": "node scripts/sqlite-migration.js --test-customers",
+    "env:setup": "node scripts/env-setup.js",
+    "env:setup:dev": "node scripts/env-setup.js development setup",
+    "env:setup:staging": "node scripts/env-setup.js staging setup",
+    "env:setup:production": "node scripts/env-setup.js production setup",
+    "env:validate": "node scripts/env-setup.js development validate",
+    "clean": "rmdir /s /q dist 2>nul || echo Cleaned",
+    "electron": "electron src/main/build.js",
+    "electron:dev": "npm run build && npm run electron",
+    "build:win": "npm run build && electron-builder --win",
+    "build:win-portable": "npm run build && electron-builder --win portable",
+    "build:win-installer": "npm run clean && npm run build && electron-builder --win nsis",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.3",
+    "@tanstack/react-query": "^5.17.15",
+    "@tanstack/react-query-devtools": "^5.17.15",
+    "concurrently": "^9.0.1",
+    "csv-parser": "^3.0.0",
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.3.9",
+    "iconv-lite": "^0.6.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-error-boundary": "^4.0.12",
+    "recharts": "^3.2.1",
+    "sqlite3": "^5.1.7",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.1",
+    "@testing-library/jest-dom": "^6.1.5",
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/user-event": "^14.5.1",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/ui": "^1.0.4",
+    "autoprefixer": "^10.4.21",
+    "electron": "^31.3.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.10",
+    "esbuild-plugin-tailwindcss": "^2.1.0",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jsdom": "^23.0.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.15",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.0.8",
+    "vitest": "^1.0.4"
+  },
+  "build": {
+    "appId": "com.meridesignhouse.desktop",
+    "productName": "Meri Design House Desktop",
+    "directories": {
+      "output": "fixed-installer",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "src/main/build.js",
+      "src/main/preload.cjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "app/dist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "MeriDesignHouse-Setup-${version}.exe"
+    },
+    "forceCodeSigning": false,
+    "publish": null
+  }
+}

@@ -1,0 +1,1320 @@
+import React, { useState, useEffect } from 'react'
+import { supabase } from '../SupabaseClient'
+import { Card, CardContent, CardHeader, CardTitle } from './ui/Card'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { Badge } from './ui/Badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/Dialog'
+import { Label } from './ui/Label'
+import { Textarea } from './ui/Textarea'
+import { 
+  SpinnerIcon, 
+  RefreshIcon, 
+  EyeIcon, 
+  ArrowRightIcon, 
+  ShoppingCartIcon,
+  EditIcon,
+  MessageSquareIcon,
+  PackageIcon
+} from './icons/index'
+
+interface Order {
+  id: string
+  orderNumber: string
+  status: 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'READY_TO_SHIP' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED'
+  totalAmount: number
+  subtotal?: number
+  tax?: number
+  shippingCost?: number
+  customerName: string
+  customerEmail: string
+  customerPhone?: string
+  shippingAddress?: string
+  shippingCity?: string
+  shippingCountry?: string
+  payment_method?: string
+  payment_status?: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
+  trackingNumber?: string
+  estimatedDelivery?: string
+  notes?: string
+  admin_notes?: string
+  createdAt: string
+  updatedAt: string
+  
+  // Yeni Desktop Alanları
+  deadline_date?: string
+  payment_received_date?: string
+  shipping_method?: string
+  order_source?: string
+  amount_received?: number
+  discount_amount?: number
+  remaining_payment?: number
+  profit_margin_percent?: number
+  labor_cost?: number
+  net_profit?: number
+  profit_margin_percent_2?: number
+  total_cost?: number
+  
+  // İlişkili veriler
+  items?: OrderItem[]
+  user?: {
+    name: string
+    email: string
+  }
+}
+
+interface OrderItem {
+  id: string
+  orderId: string
+  productId: string
+  quantity: number
+  price: number
+  personalization?: any // Kişiselleştirme bilgileri
+  product?: {
+    id: string
+    name: string
+    slug: string
+    price: number
+    product_images?: { id: string; url: string }[] | null
+  }
+}
+
+export const OrderManager: React.FC = () => {
+  const [orders, setOrders] = useState<Order[]>([])
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false)
+
+  useEffect(() => {
+    loadOrders()
+  }, [])
+
+  useEffect(() => {
+    filterOrders()
+  }, [orders, searchTerm, filterStatus])
+
+  // Dropdown dışına tıklandığında kapat
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (isStatusDropdownOpen) {
+        const target = event.target as HTMLElement
+        if (!target.closest('.status-dropdown')) {
+          setIsStatusDropdownOpen(false)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isStatusDropdownOpen])
+
+  const loadOrders = async () => {
+    try {
+      setLoading(true)
+      // Gerçek orders tablosunu kullan
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          items:order_items (
+            *,
+            product:products (
+              id,
+              name,
+              slug,
+              price,
+              product_images(id, url)
+            )
+          ),
+          user:users (
+            name,
+            email
+          )
+        `)
+        .order('createdAt', { ascending: false })
+      
+      if (ordersError) {
+        console.error('Error loading orders:', ordersError)
+        return
+      }
+
+      // Transform data to match Order interface
+      const transformedOrders: Order[] = (ordersData || []).map((order: any) => ({
+        ...order,
+        orderNumber: order.orderNumber || order.order_number || '',
+        totalAmount: order.totalAmount || order.total_amount || 0,
+        shippingCost: order.shippingCost || order.shipping_cost || 0,
+        customerName: order.customerName || order.customer_name || '',
+        customerEmail: order.customerEmail || order.customer_email || '',
+        customerPhone: order.customerPhone || order.customer_phone,
+        shippingAddress: order.shippingAddress || order.shipping_address,
+        payment_method: order.payment_method,
+        payment_status: order.payment_status,
+        trackingNumber: order.trackingNumber || order.tracking_number,
+        admin_notes: order.admin_notes
+      }))
+
+      setOrders(transformedOrders)
+
+      // Order items'ları ayrı olarak yükle
+      const { data: orderItemsData, error: itemsError } = await supabase
+        .from('order_items')
+        .select(`
+          *,
+          product:products (
+            id,
+            name,
+            slug,
+            price,
+            product_images(id, url)
+          )
+        `)
+      
+      if (itemsError) {
+        console.error('Error loading order items:', itemsError)
+      } else {
+        setOrderItems(orderItemsData || [])
+      }
+    } catch (error) {
+      console.error('Error loading orders:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filterOrders = () => {
+    let filtered = [...orders]
+
+    // Search filter
+    if (searchTerm) {
+      filtered = filtered.filter(order =>
+        order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.customerEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.customerPhone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.shippingAddress?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Status filter
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(order => order.status === filterStatus)
+    }
+
+    setFilteredOrders(filtered)
+  }
+
+  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        })
+        .eq('id', orderId)
+
+      if (error) {
+        console.error('Error updating order status:', error)
+        throw error
+      }
+
+      // Reload orders
+      await loadOrders()
+    } catch (error) {
+      console.error('Error updating order status:', error)
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'PENDING': return 'bg-yellow-100 text-yellow-800'
+      case 'CONFIRMED': return 'bg-blue-100 text-blue-800'
+      case 'PROCESSING': return 'bg-blue-100 text-blue-800'
+      case 'READY_TO_SHIP': return 'bg-indigo-100 text-indigo-800'
+      case 'SHIPPED': return 'bg-purple-100 text-purple-800'
+      case 'DELIVERED': return 'bg-green-100 text-green-800'
+      case 'CANCELLED': return 'bg-red-100 text-red-800'
+      case 'REFUNDED': return 'bg-gray-100 text-gray-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'PENDING': return 'Onay Sürecinde'
+      case 'CONFIRMED': return 'Onaylandı'
+      case 'PROCESSING': return 'İşleniyor'
+      case 'READY_TO_SHIP': return 'Kargoya Hazır'
+      case 'SHIPPED': return 'Kargoda'
+      case 'DELIVERED': return 'Teslim Edildi'
+      case 'CANCELLED': return 'İptal Edildi'
+      case 'REFUNDED': return 'İade Edildi'
+      default: return status
+    }
+  }
+
+  const getOrderItems = (orderId: string) => {
+    return orderItems.filter(item => item.orderId === orderId)
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  const getNextStatus = (currentStatus: string) => {
+    const statusFlow: Record<string, string> = {
+      'PENDING': 'CONFIRMED',
+      'CONFIRMED': 'PROCESSING',
+      'PROCESSING': 'READY_TO_SHIP',
+      'READY_TO_SHIP': 'SHIPPED',
+      'SHIPPED': 'DELIVERED'
+    }
+    return statusFlow[currentStatus] || null
+  }
+
+  const openWhatsApp = (phone: string, orderNumber: string, customerName: string) => {
+    const message = `Merhaba ${customerName},\n\nSipariş No: ${orderNumber}\n\nSiparişiniz hakkında bilgi vermek istiyorum.`
+    const whatsappUrl = `https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`
+    window.open(whatsappUrl, '_blank')
+  }
+
+  const updateOrderField = async (orderId: string, field: string, value: any) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          [field]: value,
+          updatedAt: new Date().toISOString()
+        })
+        .eq('id', orderId)
+
+      if (error) {
+        console.error('Error updating order field:', error)
+        throw error
+      }
+
+      await loadOrders()
+    } catch (error) {
+      console.error('Error updating order field:', error)
+    }
+  }
+
+  const toggleCardExpansion = (orderId: string) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(orderId)) {
+        newSet.delete(orderId)
+      } else {
+        newSet.add(orderId)
+      }
+      return newSet
+    })
+  }
+
+  const handleStatusSelect = (status: string) => {
+    setFilterStatus(status)
+    setIsStatusDropdownOpen(false)
+  }
+
+  const getStatusDisplayText = (status: string) => {
+    switch (status) {
+      case 'all': return 'Tüm durumlar'
+      case 'PENDING': return 'Onay Sürecinde'
+      case 'CONFIRMED': return 'Onaylandı'
+      case 'PROCESSING': return 'İşleniyor'
+      case 'READY_TO_SHIP': return 'Kargoya Hazır'
+      case 'SHIPPED': return 'Kargoda'
+      case 'DELIVERED': return 'Teslim Edildi'
+      case 'CANCELLED': return 'İptal Edildi'
+      case 'REFUNDED': return 'İade Edildi'
+      default: return 'Tüm durumlar'
+    }
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-gray-900">Sipariş Yönetimi</h1>
+        <div className="flex gap-2">
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            <Button
+              size="sm"
+              variant={viewMode === 'cards' ? 'default' : 'secondary'}
+              onClick={() => setViewMode('cards')}
+            >
+              Kartlar
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === 'table' ? 'default' : 'secondary'}
+              onClick={() => setViewMode('table')}
+            >
+              Tablo
+            </Button>
+          </div>
+          <Button onClick={loadOrders} disabled={loading}>
+            {loading ? <SpinnerIcon className="animate-spin" /> : <RefreshIcon />}
+            Yenile
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="search">Arama</Label>
+          <Input
+            id="search"
+            placeholder="Sipariş no, müşteri adı veya email ara..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="status">Durum</Label>
+          <div className="relative status-dropdown">
+            <button
+              type="button"
+              onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+              className="w-full px-4 py-2 text-left bg-white border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent flex justify-between items-center"
+            >
+              <span className="text-gray-900">{getStatusDisplayText(filterStatus)}</span>
+              <ArrowRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${isStatusDropdownOpen ? 'rotate-90' : ''}`} />
+            </button>
+            
+            {isStatusDropdownOpen && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
+                <div className="py-1">
+                  {[
+                    { value: 'all', label: 'Tüm durumlar' },
+                    { value: 'PENDING', label: 'Onay Sürecinde' },
+                    { value: 'CONFIRMED', label: 'Onaylandı' },
+                    { value: 'PROCESSING', label: 'İşleniyor' },
+                    { value: 'READY_TO_SHIP', label: 'Kargoya Hazır' },
+                    { value: 'SHIPPED', label: 'Kargoda' },
+                    { value: 'DELIVERED', label: 'Teslim Edildi' },
+                    { value: 'CANCELLED', label: 'İptal Edildi' },
+                    { value: 'REFUNDED', label: 'İade Edildi' }
+                  ].map((status) => (
+                    <button
+                      key={status.value}
+                      type="button"
+                      onClick={() => handleStatusSelect(status.value)}
+                      className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${
+                        filterStatus === status.value ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
+                      }`}
+                    >
+                      {status.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Orders List */}
+      {viewMode === 'cards' ? (
+        <div className="space-y-3">
+          {filteredOrders.map((order) => {
+          const orderItemsData = getOrderItems(order.id)
+          const nextStatus = getNextStatus(order.status)
+          const isExpanded = expandedCards.has(order.id)
+
+          return (
+            <Card key={order.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => toggleCardExpansion(order.id)}>
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CardTitle className="text-lg">{order.orderNumber}</CardTitle>
+                      <Badge className={getStatusColor(order.status)}>
+                        {getStatusText(order.status)}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-gray-500">{order.customerName}</p>
+                    <p className="text-sm text-gray-500">{order.customerEmail}</p>
+                    {order.customerPhone && <p className="text-sm text-gray-500">{order.customerPhone}</p>}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-gray-900">
+                      ₺{order.totalAmount.toFixed(2)}
+                    </p>
+                    {order.payment_status && (
+                      <p className="text-sm text-gray-500">
+                        Ödeme: {order.payment_status === 'PAID' ? 'Ödendi' : 'Beklemede'}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">
+                          {isExpanded ? 'Gizle' : 'Detayları göster'}
+                        </span>
+                        <ArrowRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      </div>
+                      
+                      {/* Üst Kısım Butonları */}
+                      <div className="flex gap-1">
+                        {/* WhatsApp Butonu */}
+                        {order.customerPhone && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openWhatsApp(order.customerPhone!, order.orderNumber, order.customerName)
+                            }}
+                            className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100 px-2 py-1"
+                            title="WhatsApp ile iletişim"
+                          >
+                            <MessageSquareIcon className="h-3 w-3" />
+                          </Button>
+                        )}
+
+                        {/* Detay Butonu */}
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="px-2 py-1" 
+                              title="Detayları görüntüle"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <EyeIcon className="h-3 w-3" />
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle className="text-xl">Sipariş Detayı - {order.orderNumber}</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                              {/* Müşteri ve Sipariş Bilgileri - Daha Kompakt */}
+                              <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-blue-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-blue-800 mb-2">Müşteri Bilgileri</h4>
+                                  <div className="space-y-1 text-sm">
+                                    <p><span className="font-medium">Ad:</span> {order.customerName}</p>
+                                    <p><span className="font-medium">Email:</span> {order.customerEmail}</p>
+                                    {order.customerPhone && <p><span className="font-medium">Telefon:</span> {order.customerPhone}</p>}
+                                  </div>
+                                </div>
+                                <div className="bg-green-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-green-800 mb-2">Sipariş Bilgileri</h4>
+                                  <div className="space-y-1 text-sm">
+                                    <p><span className="font-medium">Toplam:</span> ₺{order.totalAmount.toFixed(2)}</p>
+                                    <p><span className="font-medium">Durum:</span> {getStatusText(order.status)}</p>
+                                    <p><span className="font-medium">Tarih:</span> {formatDate(order.createdAt)}</p>
+                                    {order.payment_method && <p><span className="font-medium">Ödeme:</span> {order.payment_method}</p>}
+                                  </div>
+                                </div>
+                                <div className="bg-purple-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-purple-800 mb-2">Önemli Bilgiler</h4>
+                                  <div className="space-y-1 text-sm">
+                                    {order.deadline_date && <p><span className="font-medium">Termin:</span> {formatDate(order.deadline_date)}</p>}
+                                    {order.order_source && <p><span className="font-medium">Kaynak:</span> {order.order_source}</p>}
+                                    {order.trackingNumber && <p><span className="font-medium">Takip No:</span> {order.trackingNumber}</p>}
+                                    <p><span className="font-medium">Ürün Sayısı:</span> {orderItemsData.length}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Teslimat Adresi - Daha Kompakt */}
+                              {order.shippingAddress && (
+                                <div className="bg-gray-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-gray-800 mb-2">Teslimat Adresi</h4>
+                                  <p className="text-sm text-gray-700">{order.shippingAddress}</p>
+                                  {order.shippingCity && <p className="text-sm text-gray-500 mt-1">{order.shippingCity}</p>}
+                                </div>
+                              )}
+
+                              {/* Ürünler - Daha Kompakt */}
+                              <div className="bg-white border rounded-lg p-4">
+                                <h4 className="font-semibold text-gray-800 mb-3">Ürünler ({orderItemsData.length})</h4>
+                                {orderItemsData.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {orderItemsData.map((item) => (
+                                      <div key={item.id} className="flex items-center p-3 bg-gray-50 rounded-lg">
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{item.product?.name || 'Ürün'}</p>
+                                          <p className="text-xs text-gray-500">
+                                            {item.quantity} adet x ₺{item.price.toFixed(2)} = ₺{(item.quantity * item.price).toFixed(2)}
+                                          </p>
+                                          {item.personalization && (
+                                            <p className="text-xs text-blue-600 mt-1">
+                                              Kişiselleştirme: {JSON.stringify(item.personalization)}
+                                            </p>
+                                          )}
+                                        </div>
+                                        {item.product?.product_images && item.product.product_images.length > 0 && (
+                                          <img 
+                                            src={item.product.product_images[0].url} 
+                                            alt={item.product.name}
+                                            className="w-12 h-12 object-cover rounded ml-3"
+                                          />
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-center py-8 text-gray-500">
+                                    <PackageIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                                    <p>Bu siparişte ürün bulunmuyor</p>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Hızlı Düzenleme ve Admin Notları - Yan Yana */}
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Sol Taraf - Admin Notları */}
+                                <div className="bg-yellow-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-yellow-800 mb-2">Admin Notları</h4>
+                                  <Textarea
+                                    defaultValue={order.admin_notes || ''}
+                                    placeholder="Admin notları..."
+                                    className="min-h-[80px] text-sm"
+                                    onChange={(e) => {
+                                      const timeoutId = setTimeout(() => {
+                                        updateOrderField(order.id, 'admin_notes', e.target.value)
+                                      }, 1000)
+                                      return () => clearTimeout(timeoutId)
+                                    }}
+                                  />
+                                </div>
+
+                                {/* Sağ Taraf - Hızlı Düzenleme */}
+                                <div className="bg-blue-50 p-4 rounded-lg">
+                                  <h4 className="font-semibold text-blue-800 mb-2">Hızlı Düzenleme</h4>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <Label className="text-xs font-medium">Alınan Ödeme (₺)</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        defaultValue={order.amount_received || 0}
+                                        className="text-sm"
+                                        onChange={(e) => updateOrderField(order.id, 'amount_received', parseFloat(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium">İskonto (₺)</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        defaultValue={order.discount_amount || 0}
+                                        className="text-sm"
+                                        onChange={(e) => updateOrderField(order.id, 'discount_amount', parseFloat(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium">İşçilik (₺)</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        defaultValue={order.labor_cost || 0}
+                                        className="text-sm"
+                                        onChange={(e) => updateOrderField(order.id, 'labor_cost', parseFloat(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium">Maliyet (₺)</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        defaultValue={order.total_cost || 0}
+                                        className="text-sm"
+                                        onChange={(e) => updateOrderField(order.id, 'total_cost', parseFloat(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Hesaplanan Değerler - Daha Kompakt */}
+                              {(order.remaining_payment || order.net_profit || order.profit_margin_percent) && (
+                                <div className="grid grid-cols-3 gap-3">
+                                  {order.remaining_payment && (
+                                    <div className="bg-orange-50 p-3 rounded-lg text-center">
+                                      <p className="text-xs text-orange-600 font-medium">Kalan Ödeme</p>
+                                      <p className="text-lg font-bold text-orange-700">
+                                        ₺{(order.remaining_payment || 0).toFixed(2)}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {order.net_profit && (
+                                    <div className="bg-green-50 p-3 rounded-lg text-center">
+                                      <p className="text-xs text-green-600 font-medium">Net Kar</p>
+                                      <p className="text-lg font-bold text-green-700">
+                                        ₺{(order.net_profit || 0).toFixed(2)}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {order.profit_margin_percent && (
+                                    <div className="bg-purple-50 p-3 rounded-lg text-center">
+                                      <p className="text-xs text-purple-600 font-medium">Kar Yüzdesi</p>
+                                      <p className="text-lg font-bold text-purple-700">
+                                        %{(order.profit_margin_percent || 0).toFixed(1)}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+
+                        {/* Durum Güncelleme Butonu */}
+                        {nextStatus && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              updateOrderStatus(order.id, nextStatus)
+                            }}
+                            className="px-2 py-1 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                            title={`${getStatusText(nextStatus)} olarak işaretle`}
+                          >
+                            <ArrowRightIcon className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                </div>
+              </CardHeader>
+              {isExpanded && (
+                <CardContent className="pt-0">
+                  <div className="space-y-3">
+                    {/* Üst Bilgi Satırı - Daha Kompakt */}
+                    <div className="grid grid-cols-4 gap-3 text-sm bg-gray-50 p-3 rounded-lg">
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-1">Sipariş Tarihi</p>
+                        <p className="font-medium">{formatDate(order.createdAt)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-1">Ürün Sayısı</p>
+                        <p className="font-medium">{orderItemsData.length} ürün</p>
+                      </div>
+                      {order.deadline_date && (
+                        <div className="text-center">
+                          <p className="text-xs text-gray-500 mb-1">Termin Tarihi</p>
+                          <p className="font-medium text-orange-600">{formatDate(order.deadline_date)}</p>
+                        </div>
+                      )}
+                      {order.order_source && (
+                        <div className="text-center">
+                          <p className="text-xs text-gray-500 mb-1">Sipariş Yeri</p>
+                          <p className="font-medium text-blue-600">{order.order_source}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ödeme ve Maliyet Bilgileri - Daha Kompakt */}
+                    {(order.amount_received || order.discount_amount || order.labor_cost || order.remaining_payment) && (
+                      <div className="grid grid-cols-4 gap-3 text-sm">
+                        {order.amount_received && (
+                          <div className="bg-green-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-green-600 mb-1">Alınan Ödeme</p>
+                            <p className="font-bold text-green-700">₺{order.amount_received.toFixed(2)}</p>
+                          </div>
+                        )}
+                        {order.discount_amount && (
+                          <div className="bg-red-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-red-600 mb-1">İskonto</p>
+                            <p className="font-bold text-red-700">₺{order.discount_amount.toFixed(2)}</p>
+                          </div>
+                        )}
+                        {order.labor_cost && (
+                          <div className="bg-blue-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-blue-600 mb-1">İşçilik</p>
+                            <p className="font-bold text-blue-700">₺{order.labor_cost.toFixed(2)}</p>
+                          </div>
+                        )}
+                        {order.remaining_payment && order.remaining_payment > 0 && (
+                          <div className="bg-orange-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-orange-600 mb-1">Kalan Ödeme</p>
+                            <p className="font-bold text-orange-700">₺{order.remaining_payment.toFixed(2)}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Teslimat Adresi - Daha Kompakt */}
+                    {order.shippingAddress && (
+                      <div className="bg-gray-50 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-1">Teslimat Adresi</p>
+                        <p className="text-sm text-gray-700">{order.shippingAddress}</p>
+                        {order.shippingCity && (
+                          <p className="text-xs text-gray-500 mt-1">{order.shippingCity}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Kar Analizi - Yeni Eklenen */}
+                    {(order.net_profit || order.profit_margin_percent) && (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {order.net_profit && (
+                          <div className="bg-green-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-green-600 mb-1">Net Kar</p>
+                            <p className="font-bold text-green-700">₺{order.net_profit.toFixed(2)}</p>
+                          </div>
+                        )}
+                        {order.profit_margin_percent && (
+                          <div className="bg-purple-50 p-3 rounded-lg text-center">
+                            <p className="text-xs text-purple-600 mb-1">Kar Yüzdesi</p>
+                            <p className="font-bold text-purple-700">%{order.profit_margin_percent.toFixed(1)}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                      <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle className="text-xl">Sipariş Detayı - {order.orderNumber}</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          {/* Müşteri ve Sipariş Bilgileri - Daha Kompakt */}
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="bg-blue-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-blue-800 mb-2">Müşteri Bilgileri</h4>
+                              <div className="space-y-1 text-sm">
+                                <p><span className="font-medium">Ad:</span> {order.customerName}</p>
+                                <p><span className="font-medium">Email:</span> {order.customerEmail}</p>
+                                {order.customerPhone && <p><span className="font-medium">Telefon:</span> {order.customerPhone}</p>}
+                              </div>
+                            </div>
+                            <div className="bg-green-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-green-800 mb-2">Sipariş Bilgileri</h4>
+                              <div className="space-y-1 text-sm">
+                                <p><span className="font-medium">Toplam:</span> ₺{order.totalAmount.toFixed(2)}</p>
+                                <p><span className="font-medium">Durum:</span> {getStatusText(order.status)}</p>
+                                <p><span className="font-medium">Tarih:</span> {formatDate(order.createdAt)}</p>
+                                {order.payment_method && <p><span className="font-medium">Ödeme:</span> {order.payment_method}</p>}
+                              </div>
+                            </div>
+                            <div className="bg-purple-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-purple-800 mb-2">Önemli Bilgiler</h4>
+                              <div className="space-y-1 text-sm">
+                                {order.deadline_date && <p><span className="font-medium">Termin:</span> {formatDate(order.deadline_date)}</p>}
+                                {order.order_source && <p><span className="font-medium">Kaynak:</span> {order.order_source}</p>}
+                                {order.trackingNumber && <p><span className="font-medium">Takip No:</span> {order.trackingNumber}</p>}
+                                <p><span className="font-medium">Ürün Sayısı:</span> {orderItemsData.length}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Teslimat Adresi - Daha Kompakt */}
+                          {order.shippingAddress && (
+                            <div className="bg-gray-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-gray-800 mb-2">Teslimat Adresi</h4>
+                              <p className="text-sm text-gray-700">{order.shippingAddress}</p>
+                              {order.shippingCity && <p className="text-sm text-gray-500 mt-1">{order.shippingCity}</p>}
+                            </div>
+                          )}
+
+                          {/* Ürünler - Daha Kompakt */}
+                          <div className="bg-white border rounded-lg p-4">
+                            <h4 className="font-semibold text-gray-800 mb-3">Ürünler ({orderItemsData.length})</h4>
+                            {orderItemsData.length > 0 ? (
+                              <div className="space-y-2">
+                                {orderItemsData.map((item) => (
+                                  <div key={item.id} className="flex items-center p-3 bg-gray-50 rounded-lg">
+                                    <div className="flex-1">
+                                      <p className="font-medium text-sm">{item.product?.name || 'Ürün'}</p>
+                                      <p className="text-xs text-gray-500">
+                                        {item.quantity} adet x ₺{item.price.toFixed(2)} = ₺{(item.quantity * item.price).toFixed(2)}
+                                      </p>
+                                      {item.personalization && (
+                                        <p className="text-xs text-blue-600 mt-1">
+                                          Kişiselleştirme: {JSON.stringify(item.personalization)}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {item.product?.product_images && item.product.product_images.length > 0 && (
+                                      <img 
+                                        src={item.product.product_images[0].url} 
+                                        alt={item.product.name}
+                                        className="w-12 h-12 object-cover rounded ml-3"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <PackageIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                                <p>Bu siparişte ürün bulunmuyor</p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Hızlı Düzenleme ve Admin Notları - Yan Yana */}
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* Sol Taraf - Admin Notları */}
+                            <div className="bg-yellow-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-yellow-800 mb-2">Admin Notları</h4>
+                              <Textarea
+                                defaultValue={order.admin_notes || ''}
+                                placeholder="Admin notları..."
+                                className="min-h-[80px] text-sm"
+                                onChange={(e) => {
+                                  const timeoutId = setTimeout(() => {
+                                    updateOrderField(order.id, 'admin_notes', e.target.value)
+                                  }, 1000)
+                                  return () => clearTimeout(timeoutId)
+                                }}
+                              />
+                            </div>
+
+                            {/* Sağ Taraf - Hızlı Düzenleme */}
+                            <div className="bg-blue-50 p-4 rounded-lg">
+                              <h4 className="font-semibold text-blue-800 mb-2">Hızlı Düzenleme</h4>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-xs font-medium">Alınan Ödeme (₺)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    defaultValue={order.amount_received || 0}
+                                    className="text-sm"
+                                    onChange={(e) => updateOrderField(order.id, 'amount_received', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs font-medium">İskonto (₺)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    defaultValue={order.discount_amount || 0}
+                                    className="text-sm"
+                                    onChange={(e) => updateOrderField(order.id, 'discount_amount', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs font-medium">İşçilik (₺)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    defaultValue={order.labor_cost || 0}
+                                    className="text-sm"
+                                    onChange={(e) => updateOrderField(order.id, 'labor_cost', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs font-medium">Maliyet (₺)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    defaultValue={order.total_cost || 0}
+                                    className="text-sm"
+                                    onChange={(e) => updateOrderField(order.id, 'total_cost', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Hesaplanan Değerler - Daha Kompakt */}
+                          {(order.remaining_payment || order.net_profit || order.profit_margin_percent) && (
+                            <div className="grid grid-cols-3 gap-3">
+                              {order.remaining_payment && (
+                                <div className="bg-orange-50 p-3 rounded-lg text-center">
+                                  <p className="text-xs text-orange-600 font-medium">Kalan Ödeme</p>
+                                  <p className="text-lg font-bold text-orange-700">
+                                    ₺{order.remaining_payment.toFixed(2)}
+                                  </p>
+                                </div>
+                              )}
+                              {order.net_profit && (
+                                <div className="bg-green-50 p-3 rounded-lg text-center">
+                                  <p className="text-xs text-green-600 font-medium">Net Kar</p>
+                                  <p className="text-lg font-bold text-green-700">
+                                    ₺{order.net_profit.toFixed(2)}
+                                  </p>
+                                </div>
+                              )}
+                              {order.profit_margin_percent && (
+                                <div className="bg-purple-50 p-3 rounded-lg text-center">
+                                  <p className="text-xs text-purple-600 font-medium">Kar Yüzdesi</p>
+                                  <p className="text-lg font-bold text-purple-700">
+                                    %{order.profit_margin_percent.toFixed(1)}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+
+                    {nextStatus && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          updateOrderStatus(order.id, nextStatus)
+                        }}
+                        className="px-2 py-1 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                        title={`${getStatusText(nextStatus)} olarak işaretle`}
+                      >
+                        <ArrowRightIcon className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                </CardContent>
+              )}
+            </Card>
+          )
+          })}
+        </div>
+      ) : (
+        /* Tablo Görünümü */
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sipariş No</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Müşteri</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durum</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Toplam</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ödeme</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Termin</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kaynak</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kar</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tarih</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">İşlemler</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredOrders.map((order) => {
+                  const orderItemsData = getOrderItems(order.id)
+                  const nextStatus = getNextStatus(order.status)
+
+                  return (
+                    <tr key={order.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{order.orderNumber}</div>
+                        <div className="text-sm text-gray-500">{orderItemsData.length} ürün</div>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{order.customerName}</div>
+                        <div className="text-sm text-gray-500">{order.customerEmail}</div>
+                        {order.customerPhone && (
+                          <div className="text-sm text-gray-500">{order.customerPhone}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <Badge className={getStatusColor(order.status)}>
+                          {getStatusText(order.status)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          ₺{order.totalAmount.toFixed(2)}
+                        </div>
+                        {order.amount_received && (
+                          <div className="text-sm text-green-600">
+                            Alınan: ₺{order.amount_received.toFixed(2)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {order.payment_status === 'PAID' ? 'Ödendi' : 'Beklemede'}
+                        </div>
+                        {order.remaining_payment && order.remaining_payment > 0 && (
+                          <div className="text-sm text-red-600">
+                            Kalan: ₺{order.remaining_payment.toFixed(2)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        {order.deadline_date ? (
+                          <div className="text-sm text-gray-900">
+                            {formatDate(order.deadline_date)}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className="text-sm text-gray-900">
+                          {order.order_source || '-'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        {order.net_profit ? (
+                          <div className="text-sm">
+                            <div className="font-medium text-green-600">
+                              ₺{order.net_profit.toFixed(2)}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              %{order.profit_margin_percent?.toFixed(1) || 0}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {formatDate(order.createdAt)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="flex gap-1">
+                          {/* WhatsApp Butonu */}
+                          {order.customerPhone && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openWhatsApp(order.customerPhone!, order.orderNumber, order.customerName)}
+                              className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100 px-2 py-1"
+                              title="WhatsApp ile iletişim"
+                            >
+                              <MessageSquareIcon className="h-3 w-3" />
+                            </Button>
+                          )}
+
+                          {/* Detay Butonu */}
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button size="sm" variant="outline" className="px-2 py-1" title="Detayları görüntüle">
+                                <EyeIcon className="h-3 w-3" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle className="text-xl">Sipariş Detayı - {order.orderNumber}</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4">
+                                {/* Müşteri ve Sipariş Bilgileri - Daha Kompakt */}
+                                <div className="grid grid-cols-3 gap-4">
+                                  <div className="bg-blue-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-blue-800 mb-2">Müşteri Bilgileri</h4>
+                                    <div className="space-y-1 text-sm">
+                                      <p><span className="font-medium">Ad:</span> {order.customerName}</p>
+                                      <p><span className="font-medium">Email:</span> {order.customerEmail}</p>
+                                      {order.customerPhone && <p><span className="font-medium">Telefon:</span> {order.customerPhone}</p>}
+                                    </div>
+                                  </div>
+                                  <div className="bg-green-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-green-800 mb-2">Sipariş Bilgileri</h4>
+                                    <div className="space-y-1 text-sm">
+                                      <p><span className="font-medium">Toplam:</span> ₺{order.totalAmount.toFixed(2)}</p>
+                                      <p><span className="font-medium">Durum:</span> {getStatusText(order.status)}</p>
+                                      <p><span className="font-medium">Tarih:</span> {formatDate(order.createdAt)}</p>
+                                      {order.payment_method && <p><span className="font-medium">Ödeme:</span> {order.payment_method}</p>}
+                                    </div>
+                                  </div>
+                                  <div className="bg-purple-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-purple-800 mb-2">Önemli Bilgiler</h4>
+                                    <div className="space-y-1 text-sm">
+                                      {order.deadline_date && <p><span className="font-medium">Termin:</span> {formatDate(order.deadline_date)}</p>}
+                                      {order.order_source && <p><span className="font-medium">Kaynak:</span> {order.order_source}</p>}
+                                      {order.trackingNumber && <p><span className="font-medium">Takip No:</span> {order.trackingNumber}</p>}
+                                      <p><span className="font-medium">Ürün Sayısı:</span> {orderItemsData.length}</p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Teslimat Adresi - Daha Kompakt */}
+                                {order.shippingAddress && (
+                                  <div className="bg-gray-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-gray-800 mb-2">Teslimat Adresi</h4>
+                                    <p className="text-sm text-gray-700">{order.shippingAddress}</p>
+                                    {order.shippingCity && <p className="text-sm text-gray-500 mt-1">{order.shippingCity}</p>}
+                                  </div>
+                                )}
+
+                                {/* Ürünler - Daha Kompakt */}
+                                <div className="bg-white border rounded-lg p-4">
+                                  <h4 className="font-semibold text-gray-800 mb-3">Ürünler ({orderItemsData.length})</h4>
+                                  {orderItemsData.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {orderItemsData.map((item) => (
+                                        <div key={item.id} className="flex items-center p-3 bg-gray-50 rounded-lg">
+                                          <div className="flex-1">
+                                            <p className="font-medium text-sm">{item.product?.name || 'Ürün'}</p>
+                                            <p className="text-xs text-gray-500">
+                                              {item.quantity} adet x ₺{item.price.toFixed(2)} = ₺{(item.quantity * item.price).toFixed(2)}
+                                            </p>
+                                            {item.personalization && (
+                                              <p className="text-xs text-blue-600 mt-1">
+                                                Kişiselleştirme: {JSON.stringify(item.personalization)}
+                                              </p>
+                                            )}
+                                          </div>
+                                          {item.product?.product_images && item.product.product_images.length > 0 && (
+                                            <img 
+                                              src={item.product.product_images[0].url} 
+                                              alt={item.product.name}
+                                              className="w-12 h-12 object-cover rounded ml-3"
+                                            />
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-8 text-gray-500">
+                                      <PackageIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                                      <p>Bu siparişte ürün bulunmuyor</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Hızlı Düzenleme ve Admin Notları - Yan Yana */}
+                                <div className="grid grid-cols-2 gap-4">
+                                  {/* Sol Taraf - Admin Notları */}
+                                  <div className="bg-yellow-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-yellow-800 mb-2">Admin Notları</h4>
+                                    <Textarea
+                                      defaultValue={order.admin_notes || ''}
+                                      placeholder="Admin notları..."
+                                      className="min-h-[80px] text-sm"
+                                      onChange={(e) => {
+                                        const timeoutId = setTimeout(() => {
+                                          updateOrderField(order.id, 'admin_notes', e.target.value)
+                                        }, 1000)
+                                        return () => clearTimeout(timeoutId)
+                                      }}
+                                    />
+                                  </div>
+
+                                  {/* Sağ Taraf - Hızlı Düzenleme */}
+                                  <div className="bg-blue-50 p-4 rounded-lg">
+                                    <h4 className="font-semibold text-blue-800 mb-2">Hızlı Düzenleme</h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <Label className="text-xs font-medium">Alınan Ödeme (₺)</Label>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          defaultValue={order.amount_received || 0}
+                                          className="text-sm"
+                                          onChange={(e) => updateOrderField(order.id, 'amount_received', parseFloat(e.target.value) || 0)}
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-medium">İskonto (₺)</Label>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          defaultValue={order.discount_amount || 0}
+                                          className="text-sm"
+                                          onChange={(e) => updateOrderField(order.id, 'discount_amount', parseFloat(e.target.value) || 0)}
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-medium">İşçilik (₺)</Label>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          defaultValue={order.labor_cost || 0}
+                                          className="text-sm"
+                                          onChange={(e) => updateOrderField(order.id, 'labor_cost', parseFloat(e.target.value) || 0)}
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-medium">Maliyet (₺)</Label>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          defaultValue={order.total_cost || 0}
+                                          className="text-sm"
+                                          onChange={(e) => updateOrderField(order.id, 'total_cost', parseFloat(e.target.value) || 0)}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Hesaplanan Değerler - Daha Kompakt */}
+                                {(order.remaining_payment || order.net_profit || order.profit_margin_percent) && (
+                                  <div className="grid grid-cols-3 gap-3">
+                                    {order.remaining_payment && (
+                                      <div className="bg-orange-50 p-3 rounded-lg text-center">
+                                        <p className="text-xs text-orange-600 font-medium">Kalan Ödeme</p>
+                                        <p className="text-lg font-bold text-orange-700">
+                                          ₺{order.remaining_payment.toFixed(2)}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {order.net_profit && (
+                                      <div className="bg-green-50 p-3 rounded-lg text-center">
+                                        <p className="text-xs text-green-600 font-medium">Net Kar</p>
+                                        <p className="text-lg font-bold text-green-700">
+                                          ₺{order.net_profit.toFixed(2)}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {order.profit_margin_percent && (
+                                      <div className="bg-purple-50 p-3 rounded-lg text-center">
+                                        <p className="text-xs text-purple-600 font-medium">Kar Yüzdesi</p>
+                                        <p className="text-lg font-bold text-purple-700">
+                                          %{order.profit_margin_percent.toFixed(1)}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+
+                          {/* Durum Güncelleme */}
+                          {nextStatus && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateOrderStatus(order.id, nextStatus)}
+                              className="px-2 py-1 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                              title={`${getStatusText(nextStatus)} olarak işaretle`}
+                            >
+                              <ArrowRightIcon className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {filteredOrders.length === 0 && !loading && (
+        <div className="text-center py-12">
+          <ShoppingCartIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Sipariş bulunamadı</h3>
+          <p className="text-gray-500">
+            Arama kriterlerinize uygun sipariş bulunamadı.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}

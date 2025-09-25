@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+desktop-app/fixed-installer/
+desktop-app/installer-output/
+desktop-app/dist-electron/
+
+# Executable files
+*.exe
+*.dll
+
+# Electron specific
+**/app.asar
+**/win-unpacked/
+
+# Installer files
+*.blockmap
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Database files
+*.sqlite
+*.db
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+temp/
+tmp/

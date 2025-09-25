@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "jsx": "react",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/renderer/*"],
+      "../hooks": ["src/renderer/hooks"],
+      "../components": ["src/renderer/components"],
+      "../utils": ["src/renderer/utils"],
+      "../constants": ["src/renderer/constants"],
+      "../services": ["src/renderer/services"]
+    },
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": [],
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "allowJs": true
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node",
+    "compilerOptions": {
+      "jsx": "react"
+    }
+  },
+  "include": ["src/**/*", "*.ts", "*.tsx"],
+  "exclude": [
+    "src/**/*.test.*",
+    "src/**/__tests__/**",
+    "e2e/**",
+    "playwright.config.ts"
+  ]
+}
